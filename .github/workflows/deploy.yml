@@ -65,9 +65,9 @@ jobs:
           echo "ENV=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.Env')" >> $GITHUB_ENV
           echo "CWD=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.WorkingDir')" >> $GITHUB_ENV
 
-      # ---------------------------
-      # EXT2 CREATION (NO /mnt EVER)
-      # ---------------------------
+      # -----------------------------
+      # EXT2 CREATION (NO /mnt ANYWHERE)
+      # -----------------------------
       - name: Create ext2 image
         run: |
           fallocate -l $IMAGE_SIZE $IMAGE_NAME
@@ -76,31 +76,31 @@ jobs:
           mkdir -p $WORKDIR/rootfs
           sudo mount -o loop $IMAGE_NAME $WORKDIR/rootfs
 
-      # ---------------------------
+      # -----------------------------
       # COPY FILESYSTEM
-      # ---------------------------
+      # -----------------------------
       - name: Copy container filesystem
         run: |
           sudo docker cp -a $CONTAINER_ID:/ $WORKDIR/rootfs/
           sudo umount $WORKDIR/rootfs
 
-      # ---------------------------
+      # -----------------------------
       # SPLIT IMAGE
-      # ---------------------------
+      # -----------------------------
       - name: Split image
         run: |
           split $IMAGE_NAME $WORKDIR/$IMAGE_NAME. -b 128k -d
 
-      # ---------------------------
-      # METADATA (FIXED)
-      # ---------------------------
+      # -----------------------------
+      # METADATA FIX
+      # -----------------------------
       - name: Write metadata
         run: |
           echo $(stat -c%s $IMAGE_NAME) > $WORKDIR/$IMAGE_NAME.meta
 
-      # ---------------------------
+      # -----------------------------
       # FRONTEND BUILD
-      # ---------------------------
+      # -----------------------------
       - name: Build frontend
         run: |
           npm install
@@ -110,19 +110,19 @@ jobs:
         run: |
           mv build/* $WORKDIR/
 
-      # ---------------------------
+      # -----------------------------
       # INDEX FILES
-      # ---------------------------
+      # -----------------------------
       - name: Generate index lists
         run: |
           find $WORKDIR -type d | while read dir; do
             ls "$dir" > "$dir/index.list"
           done
 
-      # ---------------------------
-      # UPLOAD ARTIFACT
-      # ---------------------------
-      - name: Upload Pages artifact
+      # -----------------------------
+      # PAGES ARTIFACT
+      # -----------------------------
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ${{ env.WORKDIR }}
@@ -142,6 +142,6 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         id: deploy
         uses: actions/deploy-pages@v4
