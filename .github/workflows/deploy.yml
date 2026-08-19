@@ -1,11 +1,10 @@
-
 name: Deploy WebVM
 
 on:
   workflow_dispatch:
     inputs:
       DOCKERFILE_PATH:
-        description: "Path to Dockerfile"
+        description: "Dockerfile path"
         required: true
         default: "dockerfiles/debian_mini"
 
@@ -32,21 +31,19 @@ jobs:
     env:
       TAG: webvm-image
       IMAGE_SIZE: ${{ github.event.inputs.IMAGE_SIZE }}
-      DEPLOY_DIR: ${{ github.workspace }}/webvm_deploy
+      WORKDIR: ${{ github.workspace }}/webvm_build
 
     permissions:
       contents: write
-      pages: write
-      id-token: write
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup build variables
+      - name: Setup workspace
         run: |
+          mkdir -p $WORKDIR
           echo "IMAGE_NAME=webvm_$(date +%Y%m%d)_${{ github.run_id }}.ext2" >> $GITHUB_ENV
-          mkdir -p $DEPLOY_DIR
 
       - name: Build Docker image
         run: |
@@ -66,26 +63,27 @@ jobs:
           echo "ENV=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.Env')" >> $GITHUB_ENV
           echo "CWD=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.WorkingDir')" >> $GITHUB_ENV
 
-      - name: Create ext2 image
+      - name: Create ext2 image (FIXED MOUNT)
         run: |
           fallocate -l $IMAGE_SIZE $IMAGE_NAME
           mkfs.ext2 -F $IMAGE_NAME
-          mkdir -p /mnt/webvm
-          sudo mount -o loop $IMAGE_NAME /mnt/webvm
 
-      - name: Copy filesystem
+          mkdir -p $WORKDIR/mnt
+          sudo mount -o loop $IMAGE_NAME $WORKDIR/mnt
+
+      - name: Copy filesystem into image
         run: |
-          sudo docker cp -a $CONTAINER_ID:/ /mnt/webvm/
-          sudo umount /mnt/webvm
+          sudo docker cp -a $CONTAINER_ID:/ $WORKDIR/mnt/
+          sudo umount $WORKDIR/mnt
 
       - name: Split image for hosting
         run: |
-          split $IMAGE_NAME $DEPLOY_DIR/$IMAGE_NAME. -b 128k -d
+          split $IMAGE_NAME $WORKDIR/$IMAGE_NAME. -b 128k -d
 
-      - name: Write metadata (FIXED)
+      - name: Write metadata (FIXED PERMISSIONS)
         run: |
           SIZE=$(stat -c%s $IMAGE_NAME)
-          echo $SIZE > $DEPLOY_DIR/$IMAGE_NAME.meta
+          echo $SIZE > $WORKDIR/$IMAGE_NAME.meta
 
       - name: Build frontend
         run: |
@@ -94,29 +92,33 @@ jobs:
 
       - name: Move build output
         run: |
-          mv build/* $DEPLOY_DIR/
+          mv build/* $WORKDIR/
 
-      - name: Generate index lists
+      - name: Generate index files
         run: |
-          find $DEPLOY_DIR -type d | while read dir; do
+          find $WORKDIR -type d | while read dir; do
             ls "$dir" > "$dir/index.list"
           done
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ${{ env.DEPLOY_DIR }}
+          path: ${{ env.WORKDIR }}
 
   deploy:
     needs: build
     if: ${{ github.event.inputs.DEPLOY_TO_GITHUB_PAGES == 'true' }}
     runs-on: ubuntu-latest
 
+    permissions:
+      pages: write
+      id-token: write
+
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
 
     steps:
-      - name: Deploy to GitHub Pages
+      - name: Deploy
         id: deploy
         uses: actions/deploy-pages@v4
