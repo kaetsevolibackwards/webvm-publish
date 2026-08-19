@@ -1,3 +1,4 @@
+
 name: Deploy WebVM
 
 on:
@@ -31,21 +32,21 @@ jobs:
     env:
       TAG: webvm-image
       IMAGE_SIZE: ${{ github.event.inputs.IMAGE_SIZE }}
-      DEPLOY_DIR: /webvm_deploy
+      DEPLOY_DIR: ${{ github.workspace }}/webvm_deploy
 
     permissions:
       contents: write
+      pages: write
+      id-token: write
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Docker image name
+      - name: Setup build variables
         run: |
           echo "IMAGE_NAME=webvm_$(date +%Y%m%d)_${{ github.run_id }}.ext2" >> $GITHUB_ENV
-
-      - name: Create deploy directory
-        run: sudo mkdir -p $DEPLOY_DIR
+          mkdir -p $DEPLOY_DIR
 
       - name: Build Docker image
         run: |
@@ -59,7 +60,7 @@ jobs:
           docker run -d $TAG
           echo "CONTAINER_ID=$(docker ps -aq)" >> $GITHUB_ENV
 
-      - name: Extract CMD + ENV
+      - name: Extract container config
         run: |
           echo "CMD=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.Cmd')" >> $GITHUB_ENV
           echo "ENV=$(docker inspect $CONTAINER_ID | jq -c '.[0].Config.Env')" >> $GITHUB_ENV
@@ -67,34 +68,35 @@ jobs:
 
       - name: Create ext2 image
         run: |
-          sudo fallocate -l $IMAGE_SIZE $IMAGE_NAME
-          sudo mkfs.ext2 -F $IMAGE_NAME
-          sudo mkdir -p /mnt/webvm
+          fallocate -l $IMAGE_SIZE $IMAGE_NAME
+          mkfs.ext2 -F $IMAGE_NAME
+          mkdir -p /mnt/webvm
           sudo mount -o loop $IMAGE_NAME /mnt/webvm
 
-      - name: Copy container filesystem
+      - name: Copy filesystem
         run: |
           sudo docker cp -a $CONTAINER_ID:/ /mnt/webvm/
           sudo umount /mnt/webvm
 
       - name: Split image for hosting
         run: |
-          sudo split $IMAGE_NAME $DEPLOY_DIR/$IMAGE_NAME. -b 128k -d
+          split $IMAGE_NAME $DEPLOY_DIR/$IMAGE_NAME. -b 128k -d
 
-      - name: Write image size metadata
+      - name: Write metadata (FIXED)
         run: |
-          stat -c%s $IMAGE_NAME > $DEPLOY_DIR/$IMAGE_NAME.meta
+          SIZE=$(stat -c%s $IMAGE_NAME)
+          echo $SIZE > $DEPLOY_DIR/$IMAGE_NAME.meta
 
       - name: Build frontend
         run: |
           npm install
           npm run build
 
-      - name: Move build to deploy folder
+      - name: Move build output
         run: |
-          sudo mv build/* $DEPLOY_DIR/
+          mv build/* $DEPLOY_DIR/
 
-      - name: Generate index files
+      - name: Generate index lists
         run: |
           find $DEPLOY_DIR -type d | while read dir; do
             ls "$dir" > "$dir/index.list"
@@ -109,10 +111,6 @@ jobs:
     needs: build
     if: ${{ github.event.inputs.DEPLOY_TO_GITHUB_PAGES == 'true' }}
     runs-on: ubuntu-latest
-
-    permissions:
-      pages: write
-      id-token: write
 
     environment:
       name: github-pages
